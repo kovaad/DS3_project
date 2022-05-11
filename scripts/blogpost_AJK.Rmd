@@ -1,0 +1,75 @@
+---
+title: "War by the neighbor through the lenses of Hungarian news outlets"
+author: "Adam Jozsef Kovacs"
+date: "5/11/2022"
+output: html_document
+---
+
+```{r set chunk options, include=FALSE}
+#setting chunk options
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, echo = TRUE, eval = TRUE)
+```
+
+## Introduction 
+
+Since Russian troops entered the territory of Ukraine and essentially started a war on the 24th February, 2022, thousands of civilians lost their lives and millions were forced to flee the country. The goal of this blogpost is to grasp interesting patterns in the coverage of the war through an in-depth quantitative text analysis of all articles written on the matter by four pro-government Hungarian news portals. To this end, using web scraping, the texts of more than 2000 articles were collected. 
+
+The main research question of the project is what the communication of these mediums looked like before and after April 3rd 2022, when the Hungarian elections were held and around which time the news about the Bucha massacre became public. My impression dictates the main hypothesis of the post, which is that there has been a change in the coverage. I feel that it focuses much less on the humanitarian aid, and how the Hungarians are pacifists and much more on the painful consequences and how we have to be cautious with breaking all ties with the Russians as we are so dependent on their oil and gas. 
+
+All artifacts of this project including the R script used for scraping the articles can be found in [THIS](https://github.com/kovaad/DS3_project) github repository while the data is uploaded in [THIS](https://drive.google.com/drive/folders/1cMQixfuBkXMLztMrB60vyCPrYCxUBCO3?usp=sharing) Google Drive folder as it was too large to put on github. After downloading it, please put it in the data folder to make the code reproducible.
+
+```{r preparatory steps}
+#clear environment
+rm(list = ls())
+
+#load packages
+if (!require("pacman")) {
+  install.packages("pacman")
+}
+pacman::p_load(dplyr,tidyverse)#, quanteda, quanteda.textstats, ggrepel,text2vec, topicmodels,ggfortify,ggwordcloud)
+
+#check out custom theme
+source("theme_adam.R")
+```
+
+
+## Data collection
+
+For the data collection, I decided to scrape not only one, but four news outlets coverage on the war. The first descriptive plot depicts the number of articles by news portal. As we can see the majority of the articles are from [magyar nemzet](https://magyarnemzet.hu), namely 1369. In their case, these are all the articles with the tag #warinukraine in Hungarian. This is followed by [mandiner]() with 540 articles, where the tag was #Russian-Ukranianwar in Hungarian. The third source is szoljon, which is the regional news portal for Jász-Nagykun-Szolnok county, it was not chosen for any particular reason, but it is well-known that all the regional news portal are owned by the same pro-government consortium. In their case all the articles with the tag #ukraine were pulled from around the start of the Russian invasion. Finally, the fourth news portal is pesti sracok, which is also a pro-government, more radical news portal, where again all articles with the tag #ukraine were collected.
+
+```{r initial cleaning}
+
+#read in data
+df <- read_csv("data/full_df_correct.csv")
+
+#create target variable of before and after the elections
+#rename body for text
+#remove any unnecessary whitespces
+df <- df |> 
+  mutate(
+    label = ifelse(dates < ymd("2022-4-3"), "előtte", "utána") 
+) |> 
+  rename(text = body) |> 
+  mutate(
+    text = stringr::str_trim(text),
+    text = stringr::str_squish(text)
+  )
+
+```
+
+
+
+```{r portal count, echo=FALSE}
+#create chart of number of articles by news portal
+count_by_portal <- df |> group_by(name) |> summarise(count = n()) |> arrange(desc(count))
+
+ggplot(count_by_portal, aes(reorder(name,-count), count)) +
+  geom_bar(stat = "identity") +
+  labs(
+    y = "Cikkek száma",
+    x = NULL
+  ) +
+  geom_text(data=count_by_portal,aes(label=count,y=count),vjust=-0.5) +
+  theme_adam() 
+```
+
