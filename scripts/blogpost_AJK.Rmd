@@ -19,14 +19,11 @@ The main research question of the project is what the communication of these med
 All artifacts of this project including the R script used for scraping the articles can be found in [THIS](https://github.com/kovaad/DS3_project) github repository while the data is uploaded in [THIS](https://drive.google.com/drive/folders/1cMQixfuBkXMLztMrB60vyCPrYCxUBCO3?usp=sharing) Google Drive folder as it was too large to put on github. After downloading it, please put it in the data folder to make the code reproducible.
 
 ```{r read in, echo = FALSE}
-#clear environment
-#rm(list = ls())
-
 #load packages
 if (!require("pacman")) {
   install.packages("pacman")
 }
-pacman::p_load(dplyr,tidyverse, lubridate, tidytext, ggplot2, mediumr,quanteda,quanteda.textstats, pbapply, ggwordcloud, topicmodels, widyr, igraph, ggraph)#  ggrepel,text2vec, ,ggfortify,)
+pacman::p_load(dplyr,tidyverse, lubridate, tidytext, ggplot2, mediumr,quanteda,quanteda.textstats, pbapply, ggwordcloud, topicmodels, widyr, igraph, ggraph)
 
 #check out custom theme
 source("theme_adam.R")
@@ -34,46 +31,33 @@ source("theme_adam.R")
 
 ## Data collection and descriptives
 
-For the data collection, I decided to scrape not only one, but four news outlets coverage on the war. During this process, I first scraped all the titles, the dates (day-month-year) on which the articles were written (this had to be standardized) and the links. Then I went through all these links and scraped the actual content (body) of the articles and merged it back to the dataframe. 
-
-After binding together all the articles, I read it in for the analysis. Then I create an additional dummy variable that signals whether the article was written before or after 3rd April, 2022. For the justification of this date as a milestone refer back to the introduction. 
+For the data collection, I decided to scrape not only one, but four news outlets coverage on the war. During this process, I first scraped all the titles, the dates (day-month-year) on which the articles were written (this had to be standardized) and the links. Then I went through all these links and scraped the actual content (body) of the articles and merged it back to the dataframe. After binding together all the articles, I read it in for the analysis and created an additional dummy variable that signals whether the article was written before or after 3rd April, 2022. For the justification of this date as a milestone refer back to the introduction. 
 
 ```{r initial cleaning, echo=FALSE}
-
-#read in data
 df <- read_csv("../data/full_df_correct.csv")
 
-#create target variable of before and after the elections
-#rename body for text
-#remove any unnecessary whitespces
 df <- df |> 
   mutate(
     label = ifelse(dates < ymd("2022-4-3"), "before", "after") 
   ) |> 
   rename(text = body)
-
 ```
 
-Next, I tokenize all the articles and calculate how many tokens each article consists of. I append this information back to the main dataframe and remove all articles that have less than 10 tokens as they are very unlikely to contain any interesting results to my analysis. 
+Next, I tokenized all the articles and calculate how many tokens each article consists of. I append this information back to the main dataframe and remove all articles that have less than 10 tokens as they are very unlikely to contain any interesting results to my analysis. 
 
 ```{r tokenize and count, echo=FALSE}
-#create tidy tokens dataframe using tidytext
 tokens <- df |> 
   unnest_tokens(word, text)
 
-#count tokens by article
 tok_count <- tokens |> 
   group_by(dates,links) |> 
   summarise( 
     sum_tokens = n()
   )
 
-#add to dataframe this information
 df <- left_join(df, tok_count[, names(tok_count) != "dates"], by = "links")
 
-#remove those that contain less than 10 words
 df <- subset(df, !(sum_tokens <= 10))
-
 ```
 
 The first descriptive plot depicts the number of articles by news portal. As we can see the majority of the articles are from [magyar nemzet](https://magyarnemzet.hu), namely 1348. In their case, these are all the articles with the tag #warinukraine in Hungarian. This is followed by [mandiner](https://mandiner.hu) with 537 articles, where the tag was #Russian-Ukranianwar in Hungarian. The third source is [szoljon](https://www.szoljon.hu), which is the regional news portal for Jász-Nagykun-Szolnok county. It is well-known that all the regional news portal are owned by the same pro-government consortium, so it was chosen to represent that segment of the media. In their case all the articles with the tag #ukraine were pulled from around the start of the Russian invasion. Finally, the fourth news portal is [pesti sracok](https://pestisracok.hu), which is also a pro-government, more radical news portal, where again all articles with the tag #ukraine were collected. 
@@ -180,40 +164,38 @@ ggsave("../images/length_over_time.png")
 
 ## Data cleaning
 
-For the data cleaning part, I create a function that does all the necessary steps and can be applied to the raw texts in the dataset. First, it removes all the punctuations and numbers from the texts. This is necessary, because they do not contain any meaningful information for our type of analysis (even numbers, because as they are text in this context, the difference between 5 and 10 is the same as that of 5 and 11). Then, all text is made lower case so that words at the beginning and end of sentences are treated as the same tokens. Next, all whitespaces at the end of the documents and between words are removed. 
+For the data cleaning part, I created a function that does all the necessary steps and can be applied to the raw texts in the dataset. First, it removes all the punctuations and numbers from the texts. This is necessary, because they do not contain any meaningful information for our type of analysis (even numbers, because as they are text in this context, the difference between 5 and 10 is the same as that of 5 and 11). Then, all text is made lower case so that words at the beginning and end of sentences are treated as the same tokens. Next, all whitespaces at the end of the documents and between words are removed. 
 
 After tokenization, two sets of Hungarian stopwords are removed, one is provided by the tidytext package and the other is specifically developed for hungarian texts (on political matters) by a research group at the Hungarian Academy of Sciences: [link](https://github.com/poltextlab/HunMineR). Finally, I remove all tokens that consist of only 3 characters or less as they are most likely text garbage as well. 
 
 After pasting the tokens back together, I assign the cleaned texts to a separate column of my dataframe. 
 
-```{r data cleaning, include=FALSE}
-#load stopwords
+```{r stops, echo = FALSE}
 custom_stopwords <- HunMineR::data_stopwords_extra
 
 tidy_stops <- get_stopwords('hu')[,1]$word
+```
 
+
+```{r data cleaning, echo=TRUE}
 cleaner <- function(text) {
-  
-  #remove punctuations, numbers, make it lower case, remove unnecessary white spaces
+
   text <- stringr::str_remove_all(string = text, pattern = "[:punct:]") 
   text <- stringr::str_remove_all(string = text, pattern = "[:digit:]") 
   text <- stringr::str_to_lower(text)
   text <- stringr::str_trim(text) 
   text <- stringr::str_squish(text)
   
-  # tokenize, filter out stopwords, drop those with less than 3 characters
   tokens <- unlist(strsplit(text, "\\s+"))
   tokens <- tokens[!(tokens %in% tidy_stops)]
   tokens <- tokens[!(tokens %in% custom_stopwords)]
   tokens <- tokens[length(tokens) >= 3]
   
-  # get back processed text
   clean_text <- paste0(tokens, collapse = " ")
   
   return(clean_text)
 }
 
-#apply function
 df$clean_text <- pblapply(df$text, cleaner)
 ```
 
@@ -298,7 +280,6 @@ ggsave("../images/wordcloud.png")
 Moving on with more sophisticated analysis on the words of the articles, it is also interesting to look at the unique words in the two categories, the ones that appear to be influential in one type of texts (here before the elections) compared to the other types of texts (articles after the elections). There are multiple approaches for measuring this and though using tf-idf would have also been adequate (please find it in the [github repo](https://github.com/kovaad/DS3_project)), I decided to include here the [keyness metric](https://benjamins.com/catalog/scl.41), which looks at important, characteristic words in the after group compared to that of the other group. To this end, I used the quanteda package, which has a nice implementation of it.  
 
 ```{r keyness, include=FALSE}
-#data cleaning and creating grouped quanteda dfm
 dfm_grouped <- corpus(df) |> 
   tokens( 
     remove_punct = TRUE, 
@@ -310,27 +291,24 @@ dfm_grouped <- corpus(df) |>
   dfm() |> 
   quanteda::dfm_group(label)
 
-#get most frequent important words by group
 result_keyness <- dfm_grouped |>  
   quanteda.textstats::textstat_keyness(target = "before")
 
-#plot
 result_keyness |> 
   quanteda.textplots::textplot_keyness(color = c("#484848", "#D0D0D0")) +
-  xlim(c(-200, 200)) +
+  xlim(c(-220, 200)) +
   theme(legend.position = c(0.9,0.1))
 
-ggsave("../images/keyness.png")
+ggsave("../images/keyness.png", width = 7, height = 7)
 ```
 
 Looking at the results, we can see that before the elections, the most important words were primarily concerning domestic politics i.e. Hungarian, border, leftist, Orban (the PM of Hungary) etc. But after the elections, and more importantly in this case, after the Bucha massacre, the most important words compared to the articles beforehand became words associated with Bucha (bucsában, bucsai) and Mariupol (azovsztal) where heavy war events are ongoing. Also, the French elections gained publicity in light of the war as well with candidate Marine Le Pen's name also popping up. 
 
 ## Sentiment analysis
 
-Next, I turn to the analysis of the sentiment of the articles. I use the Hungarian sentiment dictionary that canbe found [here](http://opendata.hu/hu/dataset/hungarian-sentiment-lexicon). I am interested in two things, first of all just to get a general sense of what drives the sentiment of these articles, I look at the words that contributed most to the values that we will look at. To this end, I visualize the 10 most frequently occuring positive or negative words. 
+Next, I turn to the analysis of the sentiment of the articles. I use the Hungarian sentiment dictionary that can be found [here](http://opendata.hu/hu/dataset/hungarian-sentiment-lexicon). I am interested in two things, first of all just to get a general sense of what drives the sentiment of these articles, I look at the words that contributed most to the values that we will look at. To this end, I visualize the 10 most frequently occuring positive or negative words. 
 
 ```{r sentiment words, include=FALSE}
-#load and create sentiment dictionaries
 positive_words <- read_csv("../data/PrecoSenti/PrecoPos.csv") |>
   mutate(sentiment=1)
 
@@ -362,14 +340,12 @@ Coming back to the research question of this study, I also look at the evolution
 
 ```{r sentiment over time, include=FALSE}
 
-#sentiment over time
 df_sent_time <- sent_tokens |> 
   group_by(dates) |> 
   summarise( 
     score = sum(sentiment)
   )
 
-#helper tibble for arrows
 arrows <- 
   tibble(
     x1 = c(ymd("2022-2-3"), ymd("2022-4-23")),
@@ -378,7 +354,6 @@ arrows <-
     y2 = c(-50, -100)
   )
 
-#plot
 ggplot(df_sent_time, aes(dates, score)) +
   geom_line() +
   labs(
@@ -408,42 +383,32 @@ Looking at the resulting chart, we can see that before the 24th of February, tho
 In the next part of this analysis, I decided to also look for topics that appeared in the articles before and after the general elections were held in Hungary. In order to accomplish this, the first task was to reach the required input format for the Latent Dirichlet Allocation implementation in R, which is a document term matrix. It has all the term frequencies by article. After it was done, I trained the model looking for 9 topics, which I deemed adequate to the size of the data. I look at the top 5 terms in each topic, and een though as it is an unsupervised machine learning model i.e. it has no labels, I will try to grasp what some of the topics may represent and why those terms tend to co-occure that are in them. 
 
 ```{r topics before, include = FALSE}
-#create wordcount table from tokens before elections
 word_count_before <- tokens_before |>
   count(links,word, sort = TRUE) |>
   ungroup()
 
-#create dtm
 dtm_before <- word_count_before |>
   cast_dtm(links, word, n)
 
-#create wordcount table from tokens after elections
 word_count_after <- tokens_after |>
   count(links,word, sort = TRUE) |>
   ungroup()
 
-#create dtm
 dtm_after <- word_count_after |>
   cast_dtm(links, word, n)
 
-#conduct LDA using Gibbs method with 9 topics on articles before elections
 gibbs_before <- LDA(dtm_before, k = 9, method = "Gibbs", control = list(seed = 1234))
 
-#conduct LDA using Gibbs method with 9 topics  on articles after elections
 gibbs_after <- LDA(dtm_after, k = 9, method = "Gibbs", control = list(seed = 1234))
 
-#get topics before elecitons
 topics_before <- tidy(gibbs_before, matrix = "beta") |>
   mutate(label = "before")
 
-#get topics after elections
 topics_after <- tidy(gibbs_after, matrix = "beta") |>
   mutate(label = "after")
 
-#put it into one dataframe
 lda_gibbs <- bind_rows(topics_before, topics_after)
 
-#get top 5 terms by topics
 top_terms_gibbs <- lda_gibbs |>
   group_by(label, topic) |>
   top_n(5, beta) |>
@@ -451,7 +416,6 @@ top_terms_gibbs <- lda_gibbs |>
   ungroup() |>
   arrange(topic, -beta)
 
-#plot them for articles before the elections
 top_terms_gibbs |>
   filter(label == "before") |>
   ggplot(aes(reorder_within(term, beta, topic), beta)) +
@@ -473,7 +437,6 @@ ggsave("../images/topics_before.png")
 Looking at the topics that emerge before the elections, we can identify several interesting ones. Topic 1 has words about domestic politics, both candidates names are in it (orbán and péter), Hunary and Hungarian also appear. Topic 2 simply concerns words about the war, while topic 3 has words about the economy and sanctions. Topic 5 is about the refugees, while topic 7 shows that there are also a couple of articles that were written in English, which LDA separated nicely. Finally, among the intereesting ones, topic 8 is concerned with the attitude of the United States, the name of the president also appears. 
 
 ```{r topics after, include = FALSE}
-#plot them for articles after the elections
 top_terms_gibbs |>
   filter(label == "after") |>
   ggplot(aes(reorder_within(term, beta, topic), beta)) +
@@ -500,18 +463,14 @@ Overall, the topics remained fairly similar, there seems to be a bit more focus 
 Finally, as we have not even utilized that part of the data yet, it is also worth to analyze the titles of the articles. To this end, and to use another tool for text mining, I build a co-occurence network of words and visualize it using the [igaph](https://igraph.org) package. Since titles are fairly short and so it would not make much sense to separate the data into articles before and after the elections, I decided to simply look at the co-occurence of words in all the titles in my dataframe. 
 
 ```{r co-occur, include=FALSE}
-#apply cleaner function on titles
 df$clean_titles <- pblapply(df$titles, cleaner)
 
-#get tokens
 title_tokens <- df |> 
   unnest_tokens(word, clean_titles)
 
-#get co-occurence count
 title_word_pairs <- title_tokens |> 
   pairwise_count(word, links, sort = TRUE, upper = FALSE)
 
-#visualize network
 set.seed(1234)
 title_word_pairs |> 
   filter(n >= 8) |> 
