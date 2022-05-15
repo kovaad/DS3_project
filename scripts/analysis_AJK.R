@@ -12,7 +12,7 @@ rm(list = ls())
 if (!require("pacman")) {
   install.packages("pacman")
 }
-pacman::p_load(dplyr,tidyverse, stringr, lubridate, tidytext, HunMineR, quanteda)# quanteda.textstats, ggrepel,text2vec, topicmodels,ggfortify,ggwordcloud)
+pacman::p_load(dplyr,tidyverse, stringr, lubridate, tidytext, HunMineR, quanteda,quanteda.textstats, topicmodels, ggwordcloud, widyr, igraph, ggraph)#  ggrepel,text2vec, ,ggfortify,)
 
 #check out custom theme
 source("theme_adam.R")
@@ -338,8 +338,102 @@ ggplot(df_sent_time, aes(dates, score)) +
     color = "gray20", curvature = -0.3) +
   theme_adam()
 
-
-
 # Topic modelling ---------------------------------------------------------
+
+#create wordcount table from tokens before elections
+word_count_before <- tokens_before %>%
+  count(links,word, sort = TRUE) %>%
+  ungroup()
+
+#create dtm
+dtm_before <- word_count_before %>%
+  cast_dtm(links, word, n)
+
+#create wordcount table from tokens after elections
+word_count_after <- tokens_after %>%
+  count(links,word, sort = TRUE) %>%
+  ungroup()
+
+#create dtm
+dtm_after <- word_count_after %>%
+  cast_dtm(links, word, n)
+
+#conduct LDA using Gibbs method with 9 topics on articles before elections
+gibbs_before <- LDA(dtm_before, k = 9, method = "Gibbs", control = list(seed = 1234))
+
+#conduct LDA using Gibbs method with 9 topics  on articles after elections
+gibbs_after <- LDA(dtm_after, k = 9, method = "Gibbs", control = list(seed = 1234))
+
+#get topics before elecitons
+topics_before <- tidy(gibbs_before, matrix = "beta") %>%
+  mutate(label = "before")
+
+#get topics after elections
+topics_after <- tidy(gibbs_after, matrix = "beta") %>%
+  mutate(label = "after")
+
+#put it into one dataframe
+lda_gibbs <- bind_rows(topics_before, topics_after)
+
+#get top 5 terms by topics
+top_terms_gibbs <- lda_gibbs %>%
+  group_by(label, topic) %>%
+  top_n(5, beta) %>%
+  top_n(5, term) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+#plot them for articles before the elections
+top_terms_gibbs %>%
+  filter(label == "before") %>%
+  ggplot(aes(reorder_within(term, beta, topic), beta)) +
+  geom_col(show.legend = FALSE) +
+  theme(panel.spacing = unit(4, "lines")) +
+  coord_flip() +
+  labs(
+    title = ,
+    x = NULL,
+    y = NULL
+  ) +
+  tidytext::scale_x_reordered() +
+  facet_wrap(~topic, scales = "free") + theme_adam()
+
+#plot them for articles after the elections
+top_terms_gibbs %>%
+  filter(label == "after") %>%
+  ggplot(aes(reorder_within(term, beta, topic), beta)) +
+  geom_col(show.legend = FALSE) +
+  theme(panel.spacing = unit(4, "lines")) +
+  coord_flip() +
+  labs(
+    title = ,
+    x = NULL,
+    y = NULL
+  ) +
+  tidytext::scale_x_reordered() +
+  facet_wrap(~topic, scales = "free") + theme_adam()
+
+
+# Co-occurences -----------------------------------------------------------
+
+#apply function
+df$clean_titles <- pblapply(df$titles, cleaner)
+
+title_tokens <- df %>% 
+  unnest_tokens(word, clean_titles)
+
+title_word_pairs <- title_tokens %>% 
+  pairwise_count(word, links, sort = TRUE, upper = FALSE)
+
+set.seed(1234)
+title_word_pairs %>%
+  filter(n >= 8) %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n, edge_width = n), edge_colour = "cyan4") +
+  geom_node_point(size = 5) +
+  geom_node_text(aes(label = name), repel = TRUE, 
+                 point.padding = unit(0.2, "lines")) +
+  theme_void()
 
 
