@@ -182,13 +182,15 @@ ggsave("../images/length_over_time.png")
 
 For the data cleaning part, I create a function that does all the necessary steps and can be applied to the raw texts in the dataset. First, it removes all the punctuations and numbers from the texts. This is necessary, because they do not contain any meaningful information for our type of analysis (even numbers, because as they are text in this context, the difference between 5 and 10 is the same as that of 5 and 11). Then, all text is made lower case so that words at the beginning and end of sentences are treated as the same tokens. Next, all whitespaces at the end of the documents and between words are removed. 
 
-After tokenization, two sets of Hungarian stopwords are removed, one is provided by the [quanteda](https://quanteda.io) package and the other is specifically developed for political texts and was developed by a research group at the Hungarian Academy of Sciences: [link](https://github.com/poltextlab/HunMineR). Finally, I remove all tokens that consist of only 3 characters or less as they are most likely text garbage as well. 
+After tokenization, two sets of Hungarian stopwords are removed, one is provided by the tidytext package and the other is specifically developed for hungarian texts (on political matters) by a research group at the Hungarian Academy of Sciences: [link](https://github.com/poltextlab/HunMineR). Finally, I remove all tokens that consist of only 3 characters or less as they are most likely text garbage as well. 
 
 After pasting the tokens back together, I assign the cleaned texts to a separate column of my dataframe. 
 
 ```{r data cleaning}
 #load stopwords
 custom_stopwords <- HunMineR::data_stopwords_extra
+
+tidy_stops <- get_stopwords('hu')[,1]$word
 
 cleaner <- function(text) {
   
@@ -201,7 +203,7 @@ cleaner <- function(text) {
   
   # tokenize, filter out stopwords, drop those with less than 3 characters
   tokens <- unlist(strsplit(text, "\\s+"))
-  tokens <- tokens[!(tokens %in% quanteda::stopwords("hungarian"))]
+  tokens <- tokens[!(tokens %in% tidy_stops)]
   tokens <- tokens[!(tokens %in% custom_stopwords)]
   tokens <- tokens[length(tokens) >= 3]
   
@@ -217,6 +219,10 @@ df$clean_text <- pblapply(df$text, cleaner)
 
 
 ## Word frequencies
+
+After the preprocessing, the first thing I wanted to look at are the word frequencies of the articles before and after the elections. First of all, it is notable that the frequency scale is different, there are much more words before than after the elections, which is attributable to the sheer difference in the number of articles written as we have seen already before (1661 before, 492 after). Nevertheless, the comparison of most frequent terms is valid (but leaves room for future research when the number of articles evens out). 
+
+Unsurprisingly, the Russia, Russian, Ukraine, Ukrainian words top the charts, but still there are some interesting takeaways. Before the elections, the word Hungarian ("magyar") was the fifth most frequent signalling the importance of the effect of the war on domestic matters. After the elections, on the other hand, the words European and American both became more frequent, so the focus shifted towards more international discussions. The question of whether lemmatization or stemming would not have made sense generally arises from this figure. Firstly, I did not find any good tool for lemmatization of Hungarian text. Secondly, I tried lemmatization, but it decreased the interpretability of the results to me substantially, so I decided to drop it (if I had the focus on e.g. classifying documents using some sort of supervised ML algorithm, it probably would have made sense, but my focus was rather on exploratory research). 
 
 ```{r word frequencies}
 #create tidy tokens dataframe using tidytext from tokens before designated date
@@ -257,11 +263,11 @@ freq %>%
   tidytext::scale_x_reordered() +
   theme_adam()
 
-ggsave("../images/word_freq.png")
+ggsave("../images/word_freq.png",width = 6, height = 4)
 
 ```
 
-
+To not constrain the analysis down to the top 10 words, I also created a wordcloud with the 40 most frequent words respectively. Looking at some of the less frequent words as well, we can see the name of the Ukranian and the Russian presidents popping up. There is also talk about the economy and international matters. 
 
 ```{r wordcloud}
 #count tokens by article 2
@@ -289,7 +295,115 @@ ggsave("../images/wordcloud.png")
 ```
 
 
+Moving on with more sophisticated analysis on the words of the articles, it is also interesting to look at the unique words in the two categories, the ones that appear to be influential in one type of texts (here before the elections) compared to the other types of texts (articles after the elections). There are multiple approaches for measuring this and though using tf-idf would have also been adequate (please find it in the [github repo](https://github.com/kovaad/DS3_project)), I decided to include here the [keyness metric](https://benjamins.com/catalog/scl.41), which looks at important, characteristic words in the after group compared to that of the other group. To this end, I used the quanteda package, which has a nice implementation of it.  
 
+```{r keyness}
+#data cleaning and creating grouped quanteda dfm
+dfm_grouped <- corpus(df) |> 
+  tokens( 
+    remove_punct = TRUE, 
+    remove_numbers = TRUE 
+  ) |> 
+  tokens_tolower() |>  
+  tokens_select(pattern = tidy_stops,selection = "remove" ) |> 
+  tokens_select(pattern = custom_stopwords, selection = "remove") |> 
+  dfm() |> 
+  quanteda::dfm_group(label)
+
+#get most frequent important words by group
+result_keyness <- dfm_grouped |>  
+  quanteda.textstats::textstat_keyness(target = "before")
+
+#plot
+result_keyness |> 
+  quanteda.textplots::textplot_keyness(color = c("#484848", "#D0D0D0")) +
+  xlim(c(-200, 200)) +
+  theme(legend.position = c(0.9,0.1))
+
+ggsave("../images/keyness.png")
+```
+
+Looking at the results, we can see that before the elections, the most important words were primarily concerning domestic politics i.e. Hungarian, border, leftist, Orban (the PM of Hungary) etc. But after the elections, and more importantly in this case, after the Bucha massacre, the most important words compared to the articles beforehand became words associated with Bucha (bucsában, bucsai) and Mariupol (azovsztal) where heavy war events are ongoing. Also, the French elections gained publicity in light of the war as well with candidate Marine Le Pen's name also popping up. 
+
+## Sentiment analysis
+
+Next, I turn to the analysis of the sentiment of the articles. I am interested in two things, first of all just to get a general sense of what drives the sentiment of these articles, I look at the words that contributed most to the values that we will look at. To this end, I visualize the 10 most frequently occuring positive or negative words. 
+
+```{r sentiment words}
+#load and create sentiment dictionaries
+positive_words <- read_csv("../data/PrecoSenti/PrecoPos.csv") |>
+  mutate(sentiment=1)
+
+negative_words <- read_csv("../data/PrecoSenti/PrecoNeg.csv") |>
+  mutate(sentiment=-1)
+
+hungarian_sentiment <- rbind(positive_words, negative_words)
+
+sent_tokens <- tokens |> 
+  inner_join(hungarian_sentiment)
+
+sent_tokens |>
+  count(word, sentiment, sort = TRUE) |>
+  ungroup()|>
+  mutate(word = reorder(word, n)) |>
+  top_n(10) |>
+  ggplot(aes(word, n, fill = sentiment)) + 
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") + 
+  labs(y = "Contribution to sentiment", x = NULL) + 
+  coord_flip()
+
+ggsave("../images/sentiment_contribution.png")
+```
+
+As we can see from the top 10 words with sentiment, 6 are negative and 4 are positive. Two versions of war lead the line on the negative side, which is rather unsurprising, conflict and fear follow, while attack and refugee also made the cut on the negative side. In terms of words with rather positive sentiment, important leads the line (not sure how positive it is, but ok). Two variations of good and peace are among the frequent ones as well. 
+
+Coming back to the research question of this study, I also look at the evolution of sentiment over time. To this end, I group my data by date and sum up all the sentiment values of the articles where all negative words are counted as -1 and all the positive ones are counted as 1 (neutrals as 0). Obviously this measure is somewhat biased in the sense that we do not control with the length and count of articles, but the idea behind was that if there are more articles being written that are negative that just deepens the argument for the characterization of that period with the corresponding sentiment score. 
+
+```{r sentiment over time}
+
+#sentiment over time
+df_sent_time <- sent_tokens |> 
+  group_by(dates) |> 
+  summarise( 
+    score = sum(sentiment)
+  )
+
+#helper tibble for arrows
+arrows <- 
+  tibble(
+    x1 = c(ymd("2022-2-3"), ymd("2022-4-23")),
+    x2 =  c(ymd("2022-2-24"),ymd("2022-4-3")),
+    y1 = c(-50, -100), 
+    y2 = c(-50, -100)
+  )
+
+#plot
+ggplot(df_sent_time, aes(dates, score)) +
+  geom_line() +
+  labs(
+    y = "Sentiment score",
+    x = NULL
+  ) + 
+  geom_vline(xintercept=ymd("2022-2-24"), linetype="dashed", 
+             color = "red", size=1) + 
+  geom_vline(xintercept=ymd("2022-4-3"), linetype="dashed", 
+             color = "red", size=1) +
+  ggplot2::annotate("text", x = ymd("2022-2-1"), y = -60, label = "Russian invasion of \n Ukraine") +
+  ggplot2::annotate("text", x = ymd("2022-4-23"), y = -90, label = "Elections/\nBucha massacre") +
+  geom_curve(
+    data = arrows, aes(x = x1, y = y1, xend = x2, yend = y2),
+    arrow = arrow(length = unit(0.08, "inch")), size = 0.5,
+    color = "gray20", curvature = -0.3) +
+  theme_adam()
+```
+
+
+Looking at the resulting chart, we can see that before the 24th of February, those couple of articles were rather neutral, it shows really that the war was uncertain to the last minute. The overall sentiment score of the articles then plummeted when the Russian troops actually crossed the Ukrainian border. Though the sentiment score is pretty volatile it remained negative in total in the coming months. With the elections approaching and time passing by, some slight positive trend can be detected, and at the day of the elections, apparently even the news about the war got an unexpected boost of morale. But as further news on the events in Bucha and Mariupol started to appear in the media, the sentiment remained in this slightly negative tone of net roughly 25 negative words. 
+
+## Topic modelling
+
+In the final part of this analysis, I decided to also look for topics that appeared in the articles before and after the general elections were held in Hungary. 
 
 
 
