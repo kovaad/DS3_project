@@ -75,32 +75,6 @@ overtime <- toc_count %>%
     avg_tokens = mean(sum_tokens)
   )
 
-#plot of evolution of length of articles
-arrows <- 
-  tibble(
-    x1 = c(ymd("2022-2-3"), ymd("2022-4-23")),
-    x2 =  c(ymd("2022-2-24"),ymd("2022-4-3")),
-    y1 = c(650, 200), 
-    y2 = c(700, 250)
-  )
-
-ggplot(overtime, aes(dates, avg_tokens)) +
-  geom_line() +
-  labs(
-    y = "Average length of articles",
-    x = NULL
-  ) + 
-  geom_vline(xintercept=ymd("2022-2-24"), linetype="dashed", 
-             color = "red", size=1) + 
-  geom_vline(xintercept=ymd("2022-4-3"), linetype="dashed", 
-             color = "red", size=1) +
-  ggplot2::annotate("text", x = ymd("2022-2-2"), y = 620, label = "Russian invasion of \n Ukraine") +
-  ggplot2::annotate("text", x = ymd("2022-4-23"), y = 230, label = "Elections/\nBucha massacre") +
-  geom_curve(
-    data = arrows, aes(x = x1, y = y1, xend = x2, yend = y2),
-    arrow = arrow(length = unit(0.08, "inch")), size = 0.5,
-    color = "gray20", curvature = -0.3) +
-  theme_adam()
 
 #plot number of articles in dataset over time
 arrows <- 
@@ -123,6 +97,35 @@ ggplot(overtime, aes(dates, n_articles)) +
              color = "red", size=1) +
   ggplot2::annotate("text", x = ymd("2022-2-8"), y = 52, label = "Russian invasion of \n Ukraine") +
   ggplot2::annotate("text", x = ymd("2022-4-19"), y = 48, label = "Elections/\nBucha massacre") +
+  geom_curve(
+    data = arrows, aes(x = x1, y = y1, xend = x2, yend = y2),
+    arrow = arrow(length = unit(0.08, "inch")), size = 0.5,
+    color = "gray20", curvature = -0.3) +
+  theme_adam()
+
+
+
+#plot of evolution of length of articles
+arrows <- 
+  tibble(
+    x1 = c(ymd("2022-2-3"), ymd("2022-4-23")),
+    x2 =  c(ymd("2022-2-24"),ymd("2022-4-3")),
+    y1 = c(650, 200), 
+    y2 = c(700, 250)
+  )
+
+ggplot(overtime, aes(dates, avg_tokens)) +
+  geom_line() +
+  labs(
+    y = "Average length of articles",
+    x = NULL
+  ) + 
+  geom_vline(xintercept=ymd("2022-2-24"), linetype="dashed", 
+             color = "red", size=1) + 
+  geom_vline(xintercept=ymd("2022-4-3"), linetype="dashed", 
+             color = "red", size=1) +
+  ggplot2::annotate("text", x = ymd("2022-2-2"), y = 620, label = "Russian invasion of \n Ukraine") +
+  ggplot2::annotate("text", x = ymd("2022-4-23"), y = 230, label = "Elections/\nBucha massacre") +
   geom_curve(
     data = arrows, aes(x = x1, y = y1, xend = x2, yend = y2),
     arrow = arrow(length = unit(0.08, "inch")), size = 0.5,
