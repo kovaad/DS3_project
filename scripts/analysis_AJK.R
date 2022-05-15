@@ -12,7 +12,7 @@ rm(list = ls())
 if (!require("pacman")) {
   install.packages("pacman")
 }
-pacman::p_load(dplyr,tidyverse, stringr, lubridate, tidytext)#, quanteda, quanteda.textstats, ggrepel,text2vec, topicmodels,ggfortify,ggwordcloud)
+pacman::p_load(dplyr,tidyverse, stringr, lubridate, tidytext, HunMineR, quanteda)# quanteda.textstats, ggrepel,text2vec, topicmodels,ggfortify,ggwordcloud)
 
 #check out custom theme
 source("theme_adam.R")
@@ -131,6 +131,102 @@ ggplot(overtime, aes(dates, avg_tokens)) +
     arrow = arrow(length = unit(0.08, "inch")), size = 0.5,
     color = "gray20", curvature = -0.3) +
   theme_adam()
+
+
+# data preprocessing ------------------------------------------------------
+
+#load stopwords
+custom_stopwords <- HunMineR::data_stopwords_extra
+
+#create cleaner function
+cleaner <- function(text) {
+  
+  #remove punctuations, numbers, make it lower case, remove unnecessary white spaces
+  text <- stringr::str_remove_all(string = text, pattern = "[:punct:]") 
+  text <- stringr::str_remove_all(string = text, pattern = "[:digit:]") 
+  text <- stringr::str_to_lower(text)
+  text <- stringr::str_trim(text) 
+  text <- stringr::str_squish(text)
+  
+  # tokenize, filter out stopwords, drop those with less than 3 characters
+  tokens <- unlist(strsplit(text, "\\s+"))
+  tokens <- tokens[!(tokens %in% quanteda::stopwords("hungarian"))]
+  tokens <- tokens[!(tokens %in% custom_stopwords)]
+  tokens <- tokens[length(tokens) >= 3]
+  
+  # get back processed text
+  clean_text <- paste(tokens, collapse = " ")
+  
+  return(clean_text)
+}
+
+#apply function
+df$clean_text <- pblapply(df$text, cleaner)
+
+
+# word frequencies --------------------------------------------------------
+
+#create tidy tokens dataframe using tidytext from tokens before designated date
+tokens_before <- df |> 
+  filter(label == "before") |> 
+  unnest_tokens(word, clean_text)
+
+#count tokens by article
+tok_count_before <- tokens_before |> 
+  count(word, sort = TRUE) |> 
+  top_n(10) |> 
+  mutate(group = "before")
+
+#create tidy tokens dataframe using tidytext
+tokens_after <- df |> 
+  filter(label == "after") |> 
+  unnest_tokens(word, clean_text)
+
+#count tokens by article
+tok_count_after <- tokens_after |> 
+  count(word, sort = TRUE) |> 
+  top_n(10) |> 
+  mutate(group = "after")
+
+freq <- bind_rows(tok_count_after,tok_count_before)
+
+#before after word frequency
+freq %>% 
+  ggplot(aes(x = tidytext::reorder_within(x=word, 
+                                          by=n, 
+                                          within=group), 
+             y = n)) +
+  geom_point() +
+  coord_flip() +
+  labs(x = NULL,
+       y = "Frequency") +
+  facet_wrap(~group, scales = "free") +
+  tidytext::scale_x_reordered() +
+  theme_adam()
+
+
+# wordcloud ---------------------------------------------------------------
+
+#count tokens by article 2
+tok_count_before2 <- tokens_before |> 
+  count(word, sort = TRUE) |> 
+  top_n(40) |> 
+  mutate(group = "before")
+
+#count tokens by article 2
+tok_count_after2 <- tokens_after |> 
+  count(word, sort = TRUE) |> 
+  top_n(40) |> 
+  mutate(group = "after")
+
+freq2 <- bind_rows(tok_count_after2,tok_count_before2)
+
+#wordcloud
+freq2|> 
+  ggplot(aes(label = word, size = n, colour = group)) +
+  scale_size_area(max_size = 10) +
+  geom_text_wordcloud(show.legend = TRUE) +
+  theme_minimal()
 
 
 #sentiment analysis
