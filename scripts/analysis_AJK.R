@@ -12,7 +12,7 @@ rm(list = ls())
 if (!require("pacman")) {
   install.packages("pacman")
 }
-pacman::p_load(dplyr,tidyverse, stringr, lubridate, tidytext, HunMineR, quanteda,quanteda.textstats, topicmodels, ggwordcloud, widyr, igraph, ggraph)#  ggrepel,text2vec, ,ggfortify,)
+pacman::p_load(dplyr,tidyverse, stringr, lubridate, tidytext, HunMineR, quanteda,quanteda.textstats, topicmodels, ggwordcloud, widyr, igraph, ggraph)
 
 #check out custom theme
 source("theme_adam.R")
