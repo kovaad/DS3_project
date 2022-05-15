@@ -68,8 +68,8 @@ ggplot(count_by_portal, aes(reorder(name,-count), count)) +
   theme_adam() 
 
 #get number of articles and average length of articles by date
-overtime <- toc_count %>%
-  group_by(dates) %>% 
+overtime <- toc_count |>
+  group_by(dates) |> 
   summarise( 
     n_articles = n(),
     avg_tokens = mean(sum_tokens)
@@ -138,6 +138,8 @@ ggplot(overtime, aes(dates, avg_tokens)) +
 #load stopwords
 custom_stopwords <- HunMineR::data_stopwords_extra
 
+tidy_stops <- get_stopwords('hu')[,1]$word
+
 #create cleaner function
 cleaner <- function(text) {
   
@@ -150,7 +152,7 @@ cleaner <- function(text) {
   
   # tokenize, filter out stopwords, drop those with less than 3 characters
   tokens <- unlist(strsplit(text, "\\s+"))
-  tokens <- tokens[!(tokens %in% quanteda::stopwords("hungarian"))]
+  tokens <- tokens[!(tokens %in% tidy_stops)]
   tokens <- tokens[!(tokens %in% custom_stopwords)]
   tokens <- tokens[length(tokens) >= 3]
   
@@ -191,7 +193,7 @@ tok_count_after <- tokens_after |>
 freq <- bind_rows(tok_count_after,tok_count_before)
 
 #before after word frequency
-freq %>% 
+freq |> 
   ggplot(aes(x = tidytext::reorder_within(x=word, 
                                           by=n, 
                                           within=group), 
@@ -228,16 +230,116 @@ freq2|>
   geom_text_wordcloud(show.legend = TRUE) +
   theme_minimal()
 
+#create tf_idf doc
+df_tf_idf <- tokens  |> 
+  count(label, word) |>
+  filter(!str_detect(word, "\\d+")) |>
+  bind_tf_idf(word, label, n) |>
+  arrange(-tf_idf)
 
-#sentiment analysis
-hu_stop_word <- read_csv("data/stopwords-hu.csv")
+#visualize
+df_tf_idf |>    
+  arrange(desc(tf_idf)) |>
+  mutate(word = factor(word, levels = rev(unique(word)))) |> 
+  group_by(label) |> 
+  top_n(10) |> 
+  ungroup |>
+  ggplot(aes(word, tf_idf, fill = label)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free") +
+  coord_flip()
 
-positive_words <- read_csv("data/PrecoSenti/PrecoPos.csv") %>%
+
+# keyness -----------------------------------------------------------------
+
+#data cleaning and creating grouped quanteda dfm
+dfm_grouped <- corpus(df) |> 
+  tokens( 
+    remove_punct = TRUE, 
+    remove_numbers = TRUE 
+  ) |> 
+  tokens_tolower() |>  
+  tokens_select(pattern = tidy_stops,selection = "remove" ) |> 
+  tokens_select(pattern = custom_stopwords, selection = "remove") |> 
+  dfm() |> 
+  quanteda::dfm_group(label)
+
+#get most frequent important words by group
+result_keyness <- dfm_grouped |>  
+  quanteda.textstats::textstat_keyness(target = "before")
+
+#plot
+result_keyness |> 
+  quanteda.textplots::textplot_keyness(color = c("#484848", "#D0D0D0")) +
+  xlim(c(-200, 200)) +
+  theme(legend.position = c(0.9,0.1)) 
+
+
+# sentiment analysis ------------------------------------------------------
+
+#sentiment contribution
+
+#load and create sentiment dictionaries
+positive_words <- read_csv("../data/PrecoSenti/PrecoPos.csv") |>
   mutate(sentiment=1)
 
-negative_words <- read_csv("data/PrecoSenti/PrecoNeg.csv") %>%
+negative_words <- read_csv("../data/PrecoSenti/PrecoNeg.csv") |>
   mutate(sentiment=-1)
 
 hungarian_sentiment <- rbind(positive_words, negative_words)
+
+sent_tokens <- tokens |> 
+  inner_join(hungarian_sentiment)
+
+sent_tokens |>
+  count(word, sentiment, sort = TRUE) |>
+  ungroup()|> 
+  mutate(word = reorder(word, n)) |>
+  top_n(15) |> 
+  ggplot(aes(word, n, fill = sentiment)) + 
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") + 
+  labs(y = "Contribution to sentiment", x = NULL) + 
+  coord_flip()
+
+#sentiment over time
+df_sent_time <- sent_tokens |> 
+  group_by(dates) |> 
+  summarise( 
+    score = sum(sentiment)
+  )
+
+#helper tibble for arrows
+arrows <- 
+  tibble(
+    x1 = c(ymd("2022-2-3"), ymd("2022-4-23")),
+    x2 =  c(ymd("2022-2-24"),ymd("2022-4-3")),
+    y1 = c(-50, -100), 
+    y2 = c(-50, -100)
+  )
+
+#plot
+ggplot(df_sent_time, aes(dates, score)) +
+  geom_line() +
+  labs(
+    y = "Szentiment",
+    x = NULL
+  ) + 
+  geom_vline(xintercept=ymd("2022-2-24"), linetype="dashed", 
+             color = "red", size=1) + 
+  geom_vline(xintercept=ymd("2022-4-3"), linetype="dashed", 
+             color = "red", size=1) +
+  ggplot2::annotate("text", x = ymd("2022-2-1"), y = -60, label = "Russian invasion of \n Ukraine") +
+  ggplot2::annotate("text", x = ymd("2022-4-23"), y = -90, label = "Elections/\nBucha massacre") +
+  geom_curve(
+    data = arrows, aes(x = x1, y = y1, xend = x2, yend = y2),
+    arrow = arrow(length = unit(0.08, "inch")), size = 0.5,
+    color = "gray20", curvature = -0.3) +
+  theme_adam()
+
+
+
+# Topic modelling ---------------------------------------------------------
 
 
