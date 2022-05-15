@@ -26,17 +26,17 @@ All artifacts of this project including the R script used for scraping the artic
 if (!require("pacman")) {
   install.packages("pacman")
 }
-pacman::p_load(dplyr,tidyverse, lubridate, tidytext, ggplot2, mediumr)#, quanteda, quanteda.textstats, ggrepel,text2vec, topicmodels,ggfortify,ggwordcloud)
+pacman::p_load(dplyr,tidyverse, lubridate, tidytext, ggplot2, mediumr,quanteda, pbapply)# quanteda.textstats, ggrepel,text2vec, topicmodels,ggfortify,ggwordcloud)
 
 #check out custom theme
 source("theme_adam.R")
 ```
 
-## Data collection
+## Data collection and descriptives
 
 For the data collection, I decided to scrape not only one, but four news outlets coverage on the war. During this process, I first scraped all the titles, the dates (day-month-year) on which the articles were written (this had to be standardized) and the links. Then I went through all these links and scraped the actual content (body) of the articles and merged it back to the dataframe. 
 
-After binding together all the articles, I read it in for the analysis. The first preprocessing step is to get rid of whitespaces and create an additional dummy variable that signals whether the article was written before or after 3rd April, 2022. For the justification of this date as a milestone refer back to the introduction. 
+After binding together all the articles, I read it in for the analysis. Then I create an additional dummy variable that signals whether the article was written before or after 3rd April, 2022. For the justification of this date as a milestone refer back to the introduction. 
 
 ```{r initial cleaning, echo=FALSE}
 
@@ -50,11 +50,7 @@ df <- df |>
   mutate(
     label = ifelse(dates < ymd("2022-4-3"), "before", "after") 
   ) |> 
-  rename(text = body) |> 
-  mutate(
-    text = stringr::str_trim(text),
-    text = stringr::str_squish(text)
-  )
+  rename(text = body)
 
 ```
 
@@ -99,7 +95,11 @@ ggsave("../images/count_by_portal.png")
 
 ```
 
-Next, I was also curious about the time dimension of my data, both the number of articles that were written on these portals and the length of them. First, I visualize the number of articles appeared. 
+Next, I was also curious about the time dimension of my data, both the number of articles that were written on these portals and the length of them. First, I visualize the number of articles appeared. The date of appearence of the articles in the data range from 24th January to 1st May (the date of scraping). As we can see on the figure, there are very few articles before the start of war. This is attributable to the fact that, as described earlier, for the two portals with the most articles in the data, the tags searched for when scraping concerned the war specifically so it is logical that it does not have articles before the invasion. For the other two portals, a few articles are included that were written when the Russian troops were only getting ready on the border. 
+
+After the war started, obviously there was a very high demand for latest news on the events and the number of articles in the days afterwards reachd higher than 80 articles a day. As time passed, however, the coverage on the events started to decrease though with high volatility, indicating that on days when some military operation is taking place, the number of articles still tend to increase significantly. 
+
+After the designated events of 3rd April, there was a smaller spike reaching 40 articles a day, but in general, the number of articles became roughly constant at around 20 articles a day. 
 
 ```{r number of articles over time, include = FALSE}
 #get number of articles and average length of articles by date
@@ -142,9 +142,9 @@ ggsave("../images/count_over_time.png")
 
 ```
 
-As we can see from the figure, the 
+Then, I look at the length of articles as well (defined by the average number of tokens in the articles each day). As we can see, ery interestingly, the tendencies are exactly the opposite than that of the number of articles. After the invasion, the articles became longer and longer (there is of course volatility here as well, but still). Right before the elections, the average length of articles reached almost 800 tokens, which is roughly the double of the length of articles when the invasion happened. This is probably attributable to the fact that in the beginning, most of the articles were simple short descriptions of the (military) events. But later on, more analysis of the underlying reasons and consequences appeared on these portals that required longer pieces. Also with the elections approaching, such articles may be more effective in shaping the public's opinion on the matter. 
 
-Then, I look at the length of articles. 
+Then, after the elections, the length of the articles dropped to the level where it was when the war broke out (around 400). This may be due to lower interest due to the lack of relevance in domestic politics or the retrn of more shorter pieces on war events. 
 
 ```{r evolution of length of articles, include = FALSE}
 #plot of evolution of length of articles
@@ -178,8 +178,115 @@ ggsave("../images/length_over_time.png")
 
 ```
 
+## Data cleaning
+
+For the data cleaning part, I create a function that does all the necessary steps and can be applied to the raw texts in the dataset. First, it removes all the punctuations and numbers from the texts. This is necessary, because they do not contain any meaningful information for our type of analysis (even numbers, because as they are text in this context, the difference between 5 and 10 is the same as that of 5 and 11). Then, all text is made lower case so that words at the beginning and end of sentences are treated as the same tokens. Next, all whitespaces at the end of the documents and between words are removed. 
+
+After tokenization, two sets of Hungarian stopwords are removed, one is provided by the [quanteda](https://quanteda.io) package and the other is specifically developed for political texts and was developed by a research group at the Hungarian Academy of Sciences: [link](https://github.com/poltextlab/HunMineR). Finally, I remove all tokens that consist of only 3 characters or less as they are most likely text garbage as well. 
+
+After pasting the tokens back together, I assign the cleaned texts to a separate column of my dataframe. 
+
+```{r data cleaning}
+#load stopwords
+custom_stopwords <- HunMineR::data_stopwords_extra
+
+cleaner <- function(text) {
+  
+  #remove punctuations, numbers, make it lower case, remove unnecessary white spaces
+  text <- stringr::str_remove_all(string = text, pattern = "[:punct:]") 
+  text <- stringr::str_remove_all(string = text, pattern = "[:digit:]") 
+  text <- stringr::str_to_lower(text)
+  text <- stringr::str_trim(text) 
+  text <- stringr::str_squish(text)
+  
+  # tokenize, filter out stopwords, drop those with less than 3 characters
+  tokens <- unlist(strsplit(text, "\\s+"))
+  tokens <- tokens[!(tokens %in% quanteda::stopwords("hungarian"))]
+  tokens <- tokens[!(tokens %in% custom_stopwords)]
+  tokens <- tokens[length(tokens) >= 3]
+  
+  # get back processed text
+  clean_text <- paste0(tokens, collapse = " ")
+  
+  return(clean_text)
+}
+
+#apply function
+df$clean_text <- pblapply(df$text, cleaner)
+```
 
 
+## Word frequencies
+
+```{r word frequencies}
+#create tidy tokens dataframe using tidytext from tokens before designated date
+tokens_before <- df |> 
+  filter(label == "before") |> 
+  unnest_tokens(word, clean_text)
+
+#count tokens by article
+tok_count_before <- tokens_before |> 
+  count(word, sort = TRUE) |> 
+  top_n(10) |> 
+  mutate(group = "before")
+
+#create tidy tokens dataframe using tidytext
+tokens_after <- df |> 
+  filter(label == "after") |> 
+  unnest_tokens(word, clean_text)
+
+#count tokens by article
+tok_count_after <- tokens_after |> 
+  count(word, sort = TRUE) |> 
+  top_n(10) |> 
+  mutate(group = "after")
+
+freq <- bind_rows(tok_count_after,tok_count_before)
+
+#before after word frequency
+freq %>% 
+  ggplot(aes(x = tidytext::reorder_within(x=word, 
+                                          by=n, 
+                                          within=group), 
+             y = n)) +
+  geom_point() +
+  coord_flip() +
+  labs(x = NULL,
+       y = "Frequency") +
+  facet_wrap(~group, scales = "free") +
+  tidytext::scale_x_reordered() +
+  theme_adam()
+
+ggsave("../images/word_freq.png")
+
+```
+
+
+
+```{r wordcloud}
+#count tokens by article 2
+tok_count_before2 <- tokens_before |> 
+  count(word, sort = TRUE) |> 
+  top_n(40) |> 
+  mutate(group = "before")
+
+#count tokens by article 2
+tok_count_after2 <- tokens_after |> 
+  count(word, sort = TRUE) |> 
+  top_n(40) |> 
+  mutate(group = "after")
+
+freq2 <- bind_rows(tok_count_after2,tok_count_before2)
+
+#wordcloud
+freq2|> 
+  ggplot(aes(label = word, size = n, colour = group)) +
+  scale_size_area(max_size = 10) +
+  geom_text_wordcloud(show.legend = TRUE) +
+  theme_minimal()
+
+ggsave("../images/wordcloud.png")
+```
 
 
 
